@@ -262,7 +262,7 @@ nvtx = [
 ]
 
 [[package]]
-name = "differentiable-humanoid-dynamics"
+name = "focodyn"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

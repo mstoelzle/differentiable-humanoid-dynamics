@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from ._torch import matrix_to_quaternion_wxyz, rpy_to_matrix, skew
-from .assets import HumanoidAsset, load_asset
+from .assets import RobotAsset, load_asset
 
 
 @dataclass(frozen=True)
@@ -46,8 +46,8 @@ class ContactPoses(NamedTuple):
     transforms: torch.Tensor
 
 
-class HumanoidContactModel(torch.nn.Module):
-    """Differentiable contact-pose kinematics for humanoid feet.
+class FloatingBaseContactModel(torch.nn.Module):
+    """Differentiable contact-pose kinematics for floating-base legged robots.
 
     Contact frames are initialized from collision geometry in the URDF. For the
     Unitree G1, the ankle-roll links contain four small sphere collision origins
@@ -62,18 +62,18 @@ class HumanoidContactModel(torch.nn.Module):
 
     def __init__(
         self,
-        asset: str | HumanoidAsset = "unitree_g1",
+        asset: str | RobotAsset = "unitree_g1",
         *,
         kin_dyn=None,
         mode: str = "feet_corners",
         dtype: torch.dtype = torch.float64,
         device: torch.device | str | None = None,
     ) -> None:
-        """Initialize contact frames from a humanoid asset.
+        """Initialize contact frames from a floating-base robot asset.
 
         Args:
             asset: Built-in asset alias, direct URDF path, or pre-resolved
-                :class:`HumanoidAsset`.
+                :class:`RobotAsset`.
             kin_dyn: Adam ``KinDynComputations`` instance used for link
                 forward kinematics and Jacobians. Public kinematic methods
                 require this object.
@@ -388,7 +388,7 @@ class HumanoidContactModel(torch.nn.Module):
             RuntimeError: If no Adam kinematics object was provided.
         """
         if self.kindyn is None:
-            raise RuntimeError("HumanoidContactModel requires an Adam KinDynComputations instance.")
+            raise RuntimeError("FloatingBaseContactModel requires an Adam KinDynComputations instance.")
         return self.kindyn.forward_kinematics(link_name, base_transform, joint_positions)
 
     def _stack_link_transforms(
@@ -434,7 +434,7 @@ class HumanoidContactModel(torch.nn.Module):
             RuntimeError: If no Adam kinematics object was provided.
         """
         if self.kindyn is None:
-            raise RuntimeError("HumanoidContactModel requires an Adam KinDynComputations instance.")
+            raise RuntimeError("FloatingBaseContactModel requires an Adam KinDynComputations instance.")
         return self.kindyn.jacobian(link_name, base_transform, joint_positions)
 
     def _stack_link_jacobians(
@@ -479,11 +479,11 @@ class HumanoidContactModel(torch.nn.Module):
         return torch.index_select(unique_link_tensors, dim=-3, index=indices)
 
 
-def _contact_specs_from_asset(asset: HumanoidAsset, mode: str) -> list[ContactPointSpec]:
+def _contact_specs_from_asset(asset: RobotAsset, mode: str) -> list[ContactPointSpec]:
     """Build contact specifications from parsed asset collision geometry.
 
     Args:
-        asset: Resolved humanoid asset with parsed URDF collision metadata.
+        asset: Resolved robot asset with parsed URDF collision metadata.
         mode: Contact extraction mode, ``"feet_corners"`` or
             ``"feet_centers"``.
 
@@ -577,3 +577,6 @@ def _block_diag_rotations(rotations: torch.Tensor) -> torch.Tensor:
         3 * num_contacts,
         3 * num_contacts,
     )
+
+
+HumanoidContactModel = FloatingBaseContactModel

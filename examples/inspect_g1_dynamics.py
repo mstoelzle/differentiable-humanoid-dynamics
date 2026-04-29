@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from differentiable_humanoid_dynamics import HumanoidDynamics
+from focodyn import FloatingBaseDynamics
 
 
 def main() -> None:
@@ -14,7 +14,7 @@ def main() -> None:
     Returns:
         None. Prints tensor shapes and finiteness checks for a neutral state.
     """
-    model = HumanoidDynamics(
+    model = FloatingBaseDynamics(
         "unitree_g1",
         include_contact_forces=True,
         contact_mode="feet_corners",

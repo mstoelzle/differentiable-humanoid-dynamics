@@ -9,8 +9,8 @@ from .urdf import UrdfInfo, parse_urdf
 
 
 @dataclass(frozen=True)
-class HumanoidAsset:
-    """Resolved humanoid robot asset metadata.
+class RobotAsset:
+    """Resolved floating-base robot asset metadata.
 
     Attributes:
         name: Canonical asset name or direct URDF stem.
@@ -61,7 +61,7 @@ def available_assets() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=None)
-def load_asset(asset_name: str = "unitree_g1") -> HumanoidAsset:
+def load_asset(asset_name: str = "unitree_g1") -> RobotAsset:
     """Resolve a built-in asset alias or a direct URDF path.
 
     Args:
@@ -69,7 +69,7 @@ def load_asset(asset_name: str = "unitree_g1") -> HumanoidAsset:
             path to a URDF file.
 
     Returns:
-        :class:`HumanoidAsset` with parsed root link, joint order, contact
+        :class:`RobotAsset` with parsed root link, joint order, contact
         links, original URDF path, and Adam-compatible URDF path.
 
     Raises:
@@ -88,7 +88,7 @@ def load_asset(asset_name: str = "unitree_g1") -> HumanoidAsset:
             )
         canonical_name = asset_name
         urdf_path = (
-            resources.files("differentiable_humanoid_dynamics")
+            resources.files("focodyn")
             / "assets"
             / "robots"
             / "unitree_g1"
@@ -100,7 +100,7 @@ def load_asset(asset_name: str = "unitree_g1") -> HumanoidAsset:
     contact_links = tuple(
         link for link in _UNITREE_G1_CONTACT_LINKS if any(c.link_name == link for c in info.collisions)
     )
-    return HumanoidAsset(
+    return RobotAsset(
         name=canonical_name,
         urdf_path=urdf_path,
         adam_urdf_path=_adam_compatible_path(urdf_path),
@@ -122,3 +122,6 @@ def _adam_compatible_path(urdf_path: Path) -> Path:
     """
     candidate = urdf_path.with_name(f"{urdf_path.stem}.adam.urdf")
     return candidate if candidate.exists() else urdf_path
+
+
+HumanoidAsset = RobotAsset

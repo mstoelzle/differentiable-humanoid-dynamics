@@ -1,7 +1,7 @@
 [project]
-name = "differentiable-humanoid-dynamics"
+name = "focodyn"
 version = "0.1.0"
-description = "Differentiable humanoid dynamics and contact-point models for CBF/CLF research."
+description = "Differentiable floating-base dynamics and contact-pose Jacobians for legged robots."
 readme = "README.md"
 authors = [
     { name = "Maximilian Stölzle", email = "maximilian@stoelzle.ch" }
@@ -23,8 +23,8 @@ viz = [
 ]
 
 [project.scripts]
-dhd-check-adam-g1 = "differentiable_humanoid_dynamics.cli.check_adam_g1:main"
-dhd-visualize-g1 = "differentiable_humanoid_dynamics.visualization:main"
+focodyn-check-adam-g1 = "focodyn.cli.check_adam_g1:main"
+focodyn-visualize-g1 = "focodyn.visualization:main"
 
 [build-system]
 requires = ["uv_build>=0.11.8,<0.12.0"]

@@ -12,12 +12,12 @@ from ._torch import (
     normalize_quaternion_wxyz,
     quaternion_derivative_from_world_angular_velocity,
 )
-from .assets import HumanoidAsset, load_asset
-from .contacts import HumanoidContactModel
+from .assets import RobotAsset, load_asset
+from .contacts import FloatingBaseContactModel
 
 
 class SplitState(NamedTuple):
-    """Structured view of a humanoid state tensor.
+    """Structured view of a floating-base robot state tensor.
 
     Attributes:
         base_position: World-frame base position with shape ``(batch, 3)``.
@@ -60,8 +60,8 @@ class DynamicsTerms:
     bias: torch.Tensor
 
 
-class HumanoidDynamics(torch.nn.Module):
-    r"""Control-affine differentiable humanoid dynamics.
+class FloatingBaseDynamics(torch.nn.Module):
+    r"""Control-affine differentiable floating-base dynamics.
 
     State convention
     ----------------
@@ -100,7 +100,7 @@ class HumanoidDynamics(torch.nn.Module):
         dtype: torch.dtype = torch.float64,
         device: torch.device | str | None = None,
     ) -> None:
-        """Initialize an Adam-backed humanoid dynamics module.
+        """Initialize an Adam-backed floating-base dynamics module.
 
         Args:
             asset_name: Built-in asset alias or direct URDF path. The asset
@@ -109,7 +109,7 @@ class HumanoidDynamics(torch.nn.Module):
             include_contact_forces: Whether :meth:`g` includes contact-force
                 input columns after the joint-torque columns.
             contact_mode: Contact extraction mode passed to
-                :class:`HumanoidContactModel`.
+                :class:`FloatingBaseContactModel`.
             contact_force_frame: Frame for optional contact-force inputs.
                 ``"world"`` means contact forces are already world-frame
                 vectors. ``"contact"`` means each force is expressed in its
@@ -129,7 +129,7 @@ class HumanoidDynamics(torch.nn.Module):
             ImportError: If Adam's PyTorch backend is unavailable.
         """
         super().__init__()
-        self.asset: HumanoidAsset = load_asset(asset_name)
+        self.asset: RobotAsset = load_asset(asset_name)
         self.dtype = dtype
         self.device = torch.device(device) if device is not None else torch.device("cpu")
         self.include_contact_forces = include_contact_forces
@@ -145,9 +145,9 @@ class HumanoidDynamics(torch.nn.Module):
         self.state_dim = self.nq + self.nv
 
         self.kindyn = _build_adam_kindyn(self.asset, self.dtype, self.device)
-        self.contact_model: HumanoidContactModel | None = None
+        self.contact_model: FloatingBaseContactModel | None = None
         if include_contact_forces:
-            self.contact_model = HumanoidContactModel(
+            self.contact_model = FloatingBaseContactModel(
                 self.asset,
                 kin_dyn=self.kindyn,
                 mode=contact_mode,
@@ -498,11 +498,11 @@ class HumanoidDynamics(torch.nn.Module):
         return torch.cat((torque_map, contact_map), dim=-1)
 
 
-def _build_adam_kindyn(asset: HumanoidAsset, dtype: torch.dtype, device: torch.device):
+def _build_adam_kindyn(asset: RobotAsset, dtype: torch.dtype, device: torch.device):
     """Construct Adam's PyTorch kinematics/dynamics object for an asset.
 
     Args:
-        asset: Resolved humanoid asset containing the Adam-compatible URDF path
+        asset: Resolved robot asset containing the Adam-compatible URDF path
             and ordered joint names.
         dtype: Torch dtype requested for Adam computations.
         device: Torch device requested for Adam computations.
@@ -519,7 +519,7 @@ def _build_adam_kindyn(asset: HumanoidAsset, dtype: torch.dtype, device: torch.d
         from adam.pytorch import KinDynComputations
     except ImportError as exc:
         raise ImportError(
-            "Adam is required for HumanoidDynamics. Install with "
+            "Adam is required for FloatingBaseDynamics. Install with "
             "`uv sync` or `pip install 'adam-robotics[pytorch]'`."
         ) from exc
 
@@ -540,3 +540,6 @@ def _build_adam_kindyn(asset: HumanoidAsset, dtype: torch.dtype, device: torch.d
         )
     kindyn.set_frame_velocity_representation(adam.Representations.MIXED_REPRESENTATION)
     return kindyn
+
+
+HumanoidDynamics = FloatingBaseDynamics

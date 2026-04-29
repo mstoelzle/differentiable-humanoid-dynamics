@@ -3,16 +3,16 @@ from __future__ import annotations
 import pytest
 import torch
 
-from differentiable_humanoid_dynamics import HumanoidDynamics
+from focodyn import FloatingBaseDynamics
 
 
 @pytest.fixture(scope="module")
-def model() -> HumanoidDynamics:
+def model() -> FloatingBaseDynamics:
     pytest.importorskip("adam")
-    return HumanoidDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
+    return FloatingBaseDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
 
 
-def test_contact_fk_and_jacobian_shapes(model: HumanoidDynamics) -> None:
+def test_contact_fk_and_jacobian_shapes(model: FloatingBaseDynamics) -> None:
     assert model.contact_model is not None
     x = model.neutral_state()
     split = model.split_state(x)
@@ -40,7 +40,7 @@ def test_contact_fk_and_jacobian_shapes(model: HumanoidDynamics) -> None:
     assert torch.allclose(torch.linalg.norm(normals, dim=-1), unit)
 
 
-def test_batched_contact_fk_and_jacobian_shapes(model: HumanoidDynamics) -> None:
+def test_batched_contact_fk_and_jacobian_shapes(model: FloatingBaseDynamics) -> None:
     assert model.contact_model is not None
     x0 = model.neutral_state()
     x1 = x0.clone()
@@ -69,7 +69,7 @@ def test_batched_contact_fk_and_jacobian_shapes(model: HumanoidDynamics) -> None
 
 
 def test_contact_jacobian_calls_adam_once_per_unique_link(
-    model: HumanoidDynamics, monkeypatch: pytest.MonkeyPatch
+    model: FloatingBaseDynamics, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert model.contact_model is not None
     x = model.neutral_state()
@@ -102,7 +102,7 @@ def test_contact_jacobian_calls_adam_once_per_unique_link(
     assert jacobian_calls == unique_links
 
 
-def test_contact_jacobian_matches_autograd_contact_fk(model: HumanoidDynamics) -> None:
+def test_contact_jacobian_matches_autograd_contact_fk(model: FloatingBaseDynamics) -> None:
     assert model.contact_model is not None
     x = model.neutral_state()
     split = model.split_state(x)
@@ -121,7 +121,7 @@ def test_contact_jacobian_matches_autograd_contact_fk(model: HumanoidDynamics) -
 
 def test_contact_frame_force_mapping_is_supported() -> None:
     pytest.importorskip("adam")
-    model = HumanoidDynamics(
+    model = FloatingBaseDynamics(
         "unitree_g1",
         include_contact_forces=True,
         contact_force_frame="contact",

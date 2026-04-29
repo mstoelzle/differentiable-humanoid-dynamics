@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from differentiable_humanoid_dynamics import HumanoidDynamics, simple_walking_sequence
+from focodyn import FloatingBaseDynamics, simple_walking_sequence
 
 
 def test_simple_walking_sequence_changes_contact_positions() -> None:
     pytest.importorskip("adam")
-    model = HumanoidDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
+    model = FloatingBaseDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
     assert model.contact_model is not None
     states, times = simple_walking_sequence(model, frames=12)
     assert states.shape == (12, model.state_dim)

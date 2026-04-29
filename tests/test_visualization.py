@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from differentiable_humanoid_dynamics.visualization import (
+from focodyn.visualization import (
     _animation_status,
     _clamp_frame,
     _floor_geometry_from_states,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from differentiable_humanoid_dynamics import HumanoidContactModel, available_assets, load_asset
+from focodyn import FloatingBaseContactModel, available_assets, load_asset
 
 
 def test_unitree_g1_asset_metadata() -> None:
@@ -31,8 +31,8 @@ def test_deprecated_unitree_g1_files_are_not_vendored() -> None:
 
 
 def test_contact_modes_from_collision_geometry() -> None:
-    corners = HumanoidContactModel("unitree_g1", mode="feet_corners")
-    centers = HumanoidContactModel("unitree_g1", mode="feet_centers")
+    corners = FloatingBaseContactModel("unitree_g1", mode="feet_corners")
+    centers = FloatingBaseContactModel("unitree_g1", mode="feet_centers")
     assert corners.num_contacts == 8
     assert centers.num_contacts == 2
     assert corners.local_offsets.shape == (8, 3)

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .dynamics import HumanoidDynamics
+from .dynamics import FloatingBaseDynamics
 
 
 DEFAULT_G1_MOTION_REFERENCE = "g1_fleaven_retargeted/JOOF_walk_poses_120_jpos.npy"
@@ -16,7 +16,7 @@ EMBER_G1_MOTION_REFERENCE = "g1_amass_retargeted/cmu_06_01_poses_120_jpos.npz"
 
 @dataclass(frozen=True)
 class KinematicMotionReference:
-    """Kinematic state trajectory for a humanoid model.
+    """Kinematic state trajectory for a floating-base robot model.
 
     Attributes:
         states: State tensor with shape ``(frames, model.state_dim)`` using
@@ -39,18 +39,18 @@ def bundled_motion_reference_path(name: str = DEFAULT_G1_MOTION_REFERENCE) -> Pa
 
     Args:
         name: Motion path relative to
-            ``differentiable_humanoid_dynamics/assets/motions``.
+            ``focodyn/assets/motions``.
 
     Returns:
         Filesystem path to the bundled motion reference.
     """
-    path = resources.files("differentiable_humanoid_dynamics") / "assets" / "motions" / name
+    path = resources.files("focodyn") / "assets" / "motions" / name
     return Path(str(path))
 
 
 def load_kinematic_motion_reference(
     path: str | Path,
-    model: HumanoidDynamics,
+    model: FloatingBaseDynamics,
     *,
     root_body_name: str = "pelvis",
     source_name: str | None = None,
@@ -77,7 +77,7 @@ def load_kinematic_motion_reference(
 
     Args:
         path: Path to a retargeted G1 motion ``.npz`` or raw ``.npy`` file.
-        model: Humanoid dynamics model whose state shape, dtype, device, and
+        model: Floating-base dynamics model whose state shape, dtype, device, and
             joint order should be used.
         root_body_name: Body/link name used as the floating-base pose source.
         source_name: Optional human-readable source label. If ``None``, the
@@ -157,11 +157,11 @@ def load_kinematic_motion_reference(
     )
 
 
-def default_g1_motion_reference(model: HumanoidDynamics) -> KinematicMotionReference:
+def default_g1_motion_reference(model: FloatingBaseDynamics) -> KinematicMotionReference:
     """Load the bundled G1 retargeted AMASS walking reference.
 
     Args:
-        model: Humanoid dynamics model whose state shape, dtype, device, and
+        model: Floating-base dynamics model whose state shape, dtype, device, and
             joint order should be used.
 
     Returns:
@@ -194,13 +194,13 @@ def _name_index(names: np.ndarray, name: str, *, what: str) -> int:
     return names_list.index(name)
 
 
-def _remap_named_dofs(names: np.ndarray, values: np.ndarray, model: HumanoidDynamics) -> np.ndarray:
+def _remap_named_dofs(names: np.ndarray, values: np.ndarray, model: FloatingBaseDynamics) -> np.ndarray:
     """Remap named DOF values into the model's joint order.
 
     Args:
         names: DOF name array with shape ``(n_dofs,)``.
         values: DOF value matrix with shape ``(frames, n_dofs)``.
-        model: Humanoid dynamics model defining the target joint order.
+        model: Floating-base dynamics model defining the target joint order.
 
     Returns:
         Array with shape ``(frames, model.n_joints)``.
@@ -216,12 +216,12 @@ def _remap_named_dofs(names: np.ndarray, values: np.ndarray, model: HumanoidDyna
     return np.asarray(values[:, indices], dtype=np.float64)
 
 
-def _remap_unnamed_dofs(values: np.ndarray, model: HumanoidDynamics) -> np.ndarray:
+def _remap_unnamed_dofs(values: np.ndarray, model: FloatingBaseDynamics) -> np.ndarray:
     """Validate unnamed DOF values against the model joint count.
 
     Args:
         values: DOF value matrix with shape ``(frames, n_dofs)``.
-        model: Humanoid dynamics model defining ``n_joints``.
+        model: Floating-base dynamics model defining ``n_joints``.
 
     Returns:
         Array with shape ``(frames, model.n_joints)``.
@@ -276,25 +276,25 @@ def _xyzw_to_wxyz(quaternions: np.ndarray) -> np.ndarray:
     return np.concatenate((quaternions[..., 3:4], quaternions[..., :3]), axis=-1)
 
 
-def _shift_lowest_contact_to_ground(states: torch.Tensor, model: HumanoidDynamics) -> None:
+def _shift_lowest_contact_to_ground(states: torch.Tensor, model: FloatingBaseDynamics) -> None:
     """Translate root height so the lowest contact candidate is on ``z = 0``.
 
     Args:
         states: State tensor with shape ``(frames, model.state_dim)``. The
             tensor is modified in place by adding a constant to the root
             ``z`` coordinate.
-        model: Humanoid dynamics model used to evaluate contact FK. If the
+        model: Floating-base dynamics model used to evaluate contact FK. If the
             model does not already own a contact model, a temporary one is
             created using the same Adam kinematics object.
 
     Returns:
         None.
     """
-    from .contacts import HumanoidContactModel
+    from .contacts import FloatingBaseContactModel
 
     contact_model = model.contact_model
     if contact_model is None:
-        contact_model = HumanoidContactModel(
+        contact_model = FloatingBaseContactModel(
             model.asset,
             kin_dyn=model.kindyn,
             dtype=model.dtype,
@@ -334,12 +334,12 @@ def _normalize_quaternions(quaternions: np.ndarray) -> np.ndarray:
     return quaternions / np.clip(norms, 1e-12, None)
 
 
-def _as_tensor(values: np.ndarray, model: HumanoidDynamics) -> torch.Tensor:
+def _as_tensor(values: np.ndarray, model: FloatingBaseDynamics) -> torch.Tensor:
     """Convert numpy values to a tensor using model dtype and device.
 
     Args:
         values: Numpy array with arbitrary shape.
-        model: Humanoid dynamics model defining target dtype and device.
+        model: Floating-base dynamics model defining target dtype and device.
 
     Returns:
         Tensor with the same shape as ``values``.

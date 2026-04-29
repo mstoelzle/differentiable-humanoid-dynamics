@@ -1,6 +1,6 @@
-from .assets import HumanoidAsset, available_assets, load_asset
-from .contacts import ContactPoses, HumanoidContactModel
-from .dynamics import DynamicsTerms, HumanoidDynamics
+from .assets import RobotAsset, available_assets, load_asset
+from .contacts import ContactPoses, FloatingBaseContactModel
+from .dynamics import DynamicsTerms, FloatingBaseDynamics
 from .motion import (
     KinematicMotionReference,
     bundled_motion_reference_path,
@@ -9,10 +9,17 @@ from .motion import (
 )
 from .walking import simple_walking_sequence
 
+HumanoidAsset = RobotAsset
+HumanoidContactModel = FloatingBaseContactModel
+HumanoidDynamics = FloatingBaseDynamics
+
 __all__ = [
     "DynamicsTerms",
+    "RobotAsset",
     "HumanoidAsset",
+    "FloatingBaseContactModel",
     "HumanoidContactModel",
+    "FloatingBaseDynamics",
     "HumanoidDynamics",
     "KinematicMotionReference",
     "ContactPoses",

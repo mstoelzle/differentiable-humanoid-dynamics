@@ -11,7 +11,7 @@ import time
 import numpy as np
 import torch
 
-from .dynamics import HumanoidDynamics
+from .dynamics import FloatingBaseDynamics
 from .motion import (
     EMBER_G1_MOTION_REFERENCE,
     bundled_motion_reference_path,
@@ -49,9 +49,9 @@ def run_contact_viewer(
 
     Args:
         asset_name: Asset alias or URDF path passed to
-            :class:`HumanoidDynamics`.
+            :class:`FloatingBaseDynamics`.
         contact_mode: Contact extraction mode passed to
-            :class:`HumanoidDynamics`, such as ``"feet_corners"`` or
+            :class:`FloatingBaseDynamics`, such as ``"feet_corners"`` or
             ``"feet_centers"``.
         fps: Playback frequency for the synthetic walking sequence.
         port: TCP port used by the local Viser server.
@@ -74,7 +74,7 @@ def run_contact_viewer(
     except ImportError as exc:
         raise ImportError("Install visualization extras with `uv sync --extra viz`.") from exc
 
-    model = HumanoidDynamics(
+    model = FloatingBaseDynamics(
         asset_name,
         include_contact_forces=True,
         contact_mode=contact_mode,
@@ -360,7 +360,7 @@ def main() -> None:
     Returns:
         None.
     """
-    parser = argparse.ArgumentParser(description="Visualize Unitree G1 contact-point FK.")
+    parser = argparse.ArgumentParser(description="Visualize Unitree G1 contact-pose FK.")
     parser.add_argument("--asset", default="unitree_g1")
     parser.add_argument("--contact-mode", default="feet_corners", choices=("feet_corners", "feet_centers"))
     parser.add_argument("--fps", type=float, default=30.0)
@@ -423,7 +423,7 @@ def _floor_geometry_from_states(
 
 
 def _load_viewer_motion_options(
-    model: HumanoidDynamics,
+    model: FloatingBaseDynamics,
     *,
     fps: float,
     motion_reference: str | Path | None,
@@ -432,7 +432,7 @@ def _load_viewer_motion_options(
     """Load kinematic motion choices shown in the Viser GUI.
 
     Args:
-        model: Humanoid dynamics model used to map motions into state tensors.
+        model: Floating-base dynamics model used to map motions into state tensors.
         fps: Frame rate used for the deterministic synthetic fallback.
         motion_reference: Optional user-specified motion path.
         synthetic_motion: Whether the synthetic fallback should be selected

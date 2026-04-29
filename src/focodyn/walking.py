@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import torch
 
-from .dynamics import HumanoidDynamics
+from .dynamics import FloatingBaseDynamics
 
 
 def simple_walking_sequence(
-    model: HumanoidDynamics,
+    model: FloatingBaseDynamics,
     *,
     frames: int = 120,
     dt: float = 1.0 / 30.0,
@@ -15,11 +15,11 @@ def simple_walking_sequence(
     """Generate a lightweight kinematic walking-like sequence for visualization.
 
     This is not a dynamically feasible trajectory. It is a deterministic joint
-    animation that moves the G1 legs out of phase so contact-point FK can be
+    animation that moves the G1 legs out of phase so contact-pose FK can be
     inspected as configuration changes.
 
     Args:
-        model: Humanoid dynamics model whose state convention and joint order
+        model: Floating-base dynamics model whose state convention and joint order
             are used to build the sequence.
         frames: Number of frames in the generated sequence.
         dt: Time step between frames in seconds.

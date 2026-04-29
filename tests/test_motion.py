@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import torch
 
-from differentiable_humanoid_dynamics import (
-    HumanoidDynamics,
+from focodyn import (
+    FloatingBaseDynamics,
     bundled_motion_reference_path,
     default_g1_motion_reference,
     load_kinematic_motion_reference,
 )
-from differentiable_humanoid_dynamics.motion import EMBER_G1_MOTION_REFERENCE
+from focodyn.motion import EMBER_G1_MOTION_REFERENCE
 
 
 def test_bundled_g1_motion_reference_loads() -> None:
-    model = HumanoidDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
+    model = FloatingBaseDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
     motion = default_g1_motion_reference(model)
     assert motion.states.ndim == 2
     assert motion.states.shape[1] == model.state_dim
@@ -24,7 +24,7 @@ def test_bundled_g1_motion_reference_loads() -> None:
 
 
 def test_ember_g1_motion_reference_still_loads() -> None:
-    model = HumanoidDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
+    model = FloatingBaseDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
     motion = load_kinematic_motion_reference(
         bundled_motion_reference_path(EMBER_G1_MOTION_REFERENCE),
         model,
@@ -35,7 +35,7 @@ def test_ember_g1_motion_reference_still_loads() -> None:
 
 
 def test_bundled_g1_motion_has_knee_bend() -> None:
-    model = HumanoidDynamics("unitree_g1", dtype=torch.float64)
+    model = FloatingBaseDynamics("unitree_g1", dtype=torch.float64)
     motion = load_kinematic_motion_reference(bundled_motion_reference_path(), model)
     q = motion.states[:, 7 : 7 + model.n_joints]
     left_knee = q[:, model.joint_names.index("left_knee_joint")]
@@ -45,7 +45,7 @@ def test_bundled_g1_motion_has_knee_bend() -> None:
 
 
 def test_bundled_g1_motion_contact_heights_are_grounded() -> None:
-    model = HumanoidDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
+    model = FloatingBaseDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
     assert model.contact_model is not None
     motion = default_g1_motion_reference(model)
     contact_heights = []

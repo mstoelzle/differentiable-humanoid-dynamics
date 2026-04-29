@@ -3,16 +3,16 @@ from __future__ import annotations
 import pytest
 import torch
 
-from differentiable_humanoid_dynamics import HumanoidDynamics
+from focodyn import FloatingBaseDynamics
 
 
 @pytest.fixture(scope="module")
-def model() -> HumanoidDynamics:
+def model() -> FloatingBaseDynamics:
     pytest.importorskip("adam")
-    return HumanoidDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
+    return FloatingBaseDynamics("unitree_g1", include_contact_forces=True, dtype=torch.float64)
 
 
-def test_adam_computes_g1_dynamics_terms(model: HumanoidDynamics) -> None:
+def test_adam_computes_g1_dynamics_terms(model: FloatingBaseDynamics) -> None:
     x = model.neutral_state()
     terms = model.dynamics_terms(x)
     nv = model.nv
@@ -27,7 +27,7 @@ def test_adam_computes_g1_dynamics_terms(model: HumanoidDynamics) -> None:
     assert torch.allclose(terms.bias, terms.coriolis + terms.gravity, atol=1e-10, rtol=1e-10)
 
 
-def test_f_and_g_shapes(model: HumanoidDynamics) -> None:
+def test_f_and_g_shapes(model: FloatingBaseDynamics) -> None:
     x = model.neutral_state()
     drift = model.f(x)
     control = model.g(x)
@@ -44,7 +44,7 @@ def test_f_and_g_shapes(model: HumanoidDynamics) -> None:
     assert model.input_dim == model.n_joints + 24
 
 
-def test_f_and_g_batched_shapes(model: HumanoidDynamics) -> None:
+def test_f_and_g_batched_shapes(model: FloatingBaseDynamics) -> None:
     x0 = model.neutral_state()
     x1 = x0.clone()
     x1[0] = 0.1
@@ -57,7 +57,7 @@ def test_f_and_g_batched_shapes(model: HumanoidDynamics) -> None:
     assert torch.isfinite(control).all()
 
 
-def test_forward_matches_control_affine_formula(model: HumanoidDynamics) -> None:
+def test_forward_matches_control_affine_formula(model: FloatingBaseDynamics) -> None:
     x = model.neutral_state()
     u = torch.linspace(-0.05, 0.05, model.input_dim, dtype=model.dtype)
     expected = model.f(x) + model.g(x).matmul(u)
@@ -65,7 +65,7 @@ def test_forward_matches_control_affine_formula(model: HumanoidDynamics) -> None
 
 
 def test_forward_with_control_uses_fused_mass_matrix(
-    model: HumanoidDynamics, monkeypatch: pytest.MonkeyPatch
+    model: FloatingBaseDynamics, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     x = model.neutral_state()
     u = torch.linspace(-0.05, 0.05, model.input_dim, dtype=model.dtype)
@@ -82,7 +82,7 @@ def test_forward_with_control_uses_fused_mass_matrix(
     assert calls == 1
 
 
-def test_drift_is_differentiable(model: HumanoidDynamics) -> None:
+def test_drift_is_differentiable(model: FloatingBaseDynamics) -> None:
     x = model.neutral_state().requires_grad_(True)
     y = model.f(x)[model.nq :].sum()
     y.backward()
