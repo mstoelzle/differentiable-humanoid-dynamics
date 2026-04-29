@@ -1,0 +1,31 @@
+[project]
+name = "differentiable-humanoid-dynamics"
+version = "0.1.0"
+description = "Differentiable humanoid dynamics and contact-point models for CBF/CLF research."
+readme = "README.md"
+authors = [
+    { name = "Maximilian Stölzle", email = "maximilian@stoelzle.ch" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "adam-robotics[pytorch]>=0.5.0",
+    "numpy>=1.26",
+    "torch>=2.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+viz = [
+    "viser>=0.2.23",
+    "yourdfpy>=0.0.58",
+]
+
+[project.scripts]
+dhd-check-adam-g1 = "differentiable_humanoid_dynamics.examples.check_adam_g1:main"
+dhd-visualize-g1 = "differentiable_humanoid_dynamics.visualization:main"
+
+[build-system]
+requires = ["uv_build>=0.11.8,<0.12.0"]
+build-backend = "uv_build"
