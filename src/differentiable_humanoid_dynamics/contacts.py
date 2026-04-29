@@ -12,6 +12,17 @@ from .assets import HumanoidAsset, load_asset
 
 @dataclass(frozen=True)
 class ContactPointSpec:
+    """Static contact-frame specification in a link frame.
+
+    Attributes:
+        name: Human-readable contact name.
+        link_name: Link whose frame owns this contact transform.
+        offset: Contact origin translation in ``link_name`` coordinates with
+            shape ``(3,)``.
+        rpy: Contact-frame roll-pitch-yaw orientation in radians relative to
+            ``link_name`` with shape ``(3,)``.
+    """
+
     name: str
     link_name: str
     offset: tuple[float, float, float]
@@ -19,6 +30,17 @@ class ContactPointSpec:
 
 
 class ContactPoses(NamedTuple):
+    """Batched contact pose outputs.
+
+    Attributes:
+        positions: World-frame contact positions with shape
+            ``(..., num_contacts, 3)``.
+        quaternions_wxyz: Contact-to-world quaternions with shape
+            ``(..., num_contacts, 4)`` in ``(w, x, y, z)`` order.
+        transforms: Homogeneous contact-to-world transforms ``W_H_C`` with
+            shape ``(..., num_contacts, 4, 4)``.
+    """
+
     positions: torch.Tensor
     quaternions_wxyz: torch.Tensor
     transforms: torch.Tensor
@@ -47,6 +69,23 @@ class HumanoidContactModel(torch.nn.Module):
         dtype: torch.dtype = torch.float64,
         device: torch.device | str | None = None,
     ) -> None:
+        """Initialize contact frames from a humanoid asset.
+
+        Args:
+            asset: Built-in asset alias, direct URDF path, or pre-resolved
+                :class:`HumanoidAsset`.
+            kin_dyn: Adam ``KinDynComputations`` instance used for link
+                forward kinematics and Jacobians. Public kinematic methods
+                require this object.
+            mode: Contact extraction mode. ``"feet_corners"`` creates one
+                contact frame per foot-corner collision sphere; ``"feet_centers"``
+                creates one averaged frame per foot.
+            dtype: Torch dtype used for contact buffers.
+            device: Torch device used for contact buffers. ``None`` selects CPU.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.asset = load_asset(asset) if isinstance(asset, str) else asset
         self.mode = mode
@@ -65,10 +104,27 @@ class HumanoidContactModel(torch.nn.Module):
 
     @property
     def num_contacts(self) -> int:
+        """Return the number of configured contact frames.
+
+        Args:
+            None.
+
+        Returns:
+            Number of contacts. Stacked contact position tensors use this as
+            ``num_contacts``.
+        """
         return len(self.contact_specs)
 
     @property
     def force_dim(self) -> int:
+        """Return the stacked 3D contact force dimension.
+
+        Args:
+            None.
+
+        Returns:
+            Integer ``3 * num_contacts``.
+        """
         return 3 * self.num_contacts
 
     def contact_positions(
@@ -76,22 +132,54 @@ class HumanoidContactModel(torch.nn.Module):
     ) -> torch.Tensor:
         """Return world-frame contact point positions.
 
-        Shape is ``(num_contacts, 3)`` for a single state or
-        ``(batch, num_contacts, 3)`` for batched inputs.
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)`` in ``asset.joint_names`` order.
+
+        Returns:
+            World-frame contact positions with shape ``(num_contacts, 3)`` for
+            a single state or ``(batch, num_contacts, 3)`` for batched inputs.
         """
         return self.contact_transforms(base_transform, joint_positions)[..., :3, 3]
 
     def contact_quaternions(
         self, base_transform: torch.Tensor, joint_positions: torch.Tensor
     ) -> torch.Tensor:
-        """Return contact-to-world quaternions in Adam/scalar-first order."""
+        """Return contact-to-world quaternions.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Quaternion tensor with shape ``(num_contacts, 4)`` or
+            ``(batch, num_contacts, 4)`` in Adam/scalar-first ``(w, x, y, z)``
+            order.
+        """
         rotations = self.contact_transforms(base_transform, joint_positions)[..., :3, :3]
         return matrix_to_quaternion_wxyz(rotations)
 
     def contact_poses(
         self, base_transform: torch.Tensor, joint_positions: torch.Tensor
     ) -> ContactPoses:
-        """Return world-frame SE(3) contact poses as positions, quaternions, and matrices."""
+        """Return world-frame SE(3) contact poses.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            :class:`ContactPoses` containing positions with shape
+            ``(..., num_contacts, 3)``, quaternions with shape
+            ``(..., num_contacts, 4)``, and transforms with shape
+            ``(..., num_contacts, 4, 4)``.
+        """
         transforms = self.contact_transforms(base_transform, joint_positions)
         return ContactPoses(
             positions=transforms[..., :3, 3],
@@ -102,7 +190,18 @@ class HumanoidContactModel(torch.nn.Module):
     def contact_normals(
         self, base_transform: torch.Tensor, joint_positions: torch.Tensor
     ) -> torch.Tensor:
-        """Return each contact frame's positive z-axis in world coordinates."""
+        """Return each contact frame's positive z-axis in world coordinates.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Unit normal tensor with shape ``(num_contacts, 3)`` or
+            ``(batch, num_contacts, 3)``.
+        """
         transforms = self.contact_transforms(base_transform, joint_positions)
         return transforms[..., :3, 2]
 
@@ -111,8 +210,16 @@ class HumanoidContactModel(torch.nn.Module):
     ) -> torch.Tensor:
         """Return ``W_H_C`` contact transforms.
 
-        Shape is ``(num_contacts, 4, 4)`` for a single state or
-        ``(batch, num_contacts, 4, 4)`` for batched inputs.
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Contact-to-world transforms with shape ``(num_contacts, 4, 4)`` for
+            a single state or ``(batch, num_contacts, 4, 4)`` for batched
+            inputs.
         """
         transforms = []
         for link_name, offset, local_rotation in zip(
@@ -140,8 +247,17 @@ class HumanoidContactModel(torch.nn.Module):
 
         The output maps Adam mixed generalized velocity
         ``nu = (v_WB, omega_WB, s_dot)`` to stacked contact point velocities.
-        Shape is ``(3 * num_contacts, 6 + n_joints)`` or batched as
-        ``(batch, 3 * num_contacts, 6 + n_joints)``.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Translational Jacobian with shape
+            ``(3 * num_contacts, 6 + n_joints)`` or batched shape
+            ``(batch, 3 * num_contacts, 6 + n_joints)``.
         """
         jacobians = []
         for link_name, offset in zip(self.contact_link_names, self.local_offsets):
@@ -163,6 +279,17 @@ class HumanoidContactModel(torch.nn.Module):
         Each 6-row block is ``(linear_velocity, angular_velocity)`` in world
         coordinates, matching the mixed-representation convention used for
         contact poses and contact force mapping.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Spatial Jacobian with shape
+            ``(6 * num_contacts, 6 + n_joints)`` or batched shape
+            ``(batch, 6 * num_contacts, 6 + n_joints)``.
         """
         spatial_blocks = []
         for link_name, offset in zip(self.contact_link_names, self.local_offsets):
@@ -183,7 +310,25 @@ class HumanoidContactModel(torch.nn.Module):
         *,
         force_frame: str,
     ) -> torch.Tensor:
-        """Return the block map from contact-force coordinates to world forces."""
+        """Return the block map from contact-force coordinates to world forces.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+            force_frame: ``"world"`` to leave stacked contact forces unchanged
+                or ``"contact"`` to rotate each contact-frame force into the
+                world frame.
+
+        Returns:
+            Block-diagonal transform with shape
+            ``(3 * num_contacts, 3 * num_contacts)`` or batched shape
+            ``(batch, 3 * num_contacts, 3 * num_contacts)``.
+
+        Raises:
+            ValueError: If ``force_frame`` is not ``"world"`` or ``"contact"``.
+        """
         if force_frame == "world":
             dim = self.force_dim
             batch_shape = base_transform.shape[:-2]
@@ -198,6 +343,22 @@ class HumanoidContactModel(torch.nn.Module):
     def _fk(
         self, link_name: str, base_transform: torch.Tensor, joint_positions: torch.Tensor
     ) -> torch.Tensor:
+        """Evaluate Adam forward kinematics for a link.
+
+        Args:
+            link_name: Link/frame name known to Adam.
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Link-to-world transform with shape ``(4, 4)`` or
+            ``(batch, 4, 4)``.
+
+        Raises:
+            RuntimeError: If no Adam kinematics object was provided.
+        """
         if self.kindyn is None:
             raise RuntimeError("HumanoidContactModel requires an Adam KinDynComputations instance.")
         return self.kindyn.forward_kinematics(link_name, base_transform, joint_positions)
@@ -205,12 +366,45 @@ class HumanoidContactModel(torch.nn.Module):
     def _jacobian(
         self, link_name: str, base_transform: torch.Tensor, joint_positions: torch.Tensor
     ) -> torch.Tensor:
+        """Evaluate Adam mixed-representation link Jacobian.
+
+        Args:
+            link_name: Link/frame name known to Adam.
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Spatial Jacobian with shape ``(6, 6 + n_joints)`` or
+            ``(batch, 6, 6 + n_joints)``. Rows are Adam-order
+            ``(linear_velocity, angular_velocity)``.
+
+        Raises:
+            RuntimeError: If no Adam kinematics object was provided.
+        """
         if self.kindyn is None:
             raise RuntimeError("HumanoidContactModel requires an Adam KinDynComputations instance.")
         return self.kindyn.jacobian(link_name, base_transform, joint_positions)
 
 
 def _contact_specs_from_asset(asset: HumanoidAsset, mode: str) -> list[ContactPointSpec]:
+    """Build contact specifications from parsed asset collision geometry.
+
+    Args:
+        asset: Resolved humanoid asset with parsed URDF collision metadata.
+        mode: Contact extraction mode, ``"feet_corners"`` or
+            ``"feet_centers"``.
+
+    Returns:
+        List of :class:`ContactPointSpec` entries. Each entry stores one
+        contact origin with shape ``(3,)`` and one contact orientation with
+        shape ``(3,)`` in the owning link frame.
+
+    Raises:
+        ValueError: If the asset has no default contact links, if required foot
+            collision spheres are missing, or if ``mode`` is unknown.
+    """
     if not asset.default_contact_links:
         raise ValueError(f"Asset {asset.name!r} has no default foot contact links.")
 
@@ -258,6 +452,15 @@ def _contact_specs_from_asset(asset: HumanoidAsset, mode: str) -> list[ContactPo
 
 
 def _sort_foot_collisions(collisions):
+    """Sort foot collision candidates in a stable heel/toe, lateral order.
+
+    Args:
+        collisions: Sequence of collision metadata objects with ``xyz`` fields
+            of shape ``(3,)``.
+
+    Returns:
+        List of collisions sorted by x coordinate and then y coordinate.
+    """
     # Stable order: heel/toe by x, then left/right by y.
     points = np.asarray([collision.xyz for collision in collisions], dtype=np.float64)
     order = np.lexsort((points[:, 1], points[:, 0]))
@@ -265,6 +468,16 @@ def _sort_foot_collisions(collisions):
 
 
 def _block_diag_rotations(rotations: torch.Tensor) -> torch.Tensor:
+    """Create a block-diagonal matrix from contact rotations.
+
+    Args:
+        rotations: Rotation matrix tensor with shape
+            ``(..., num_contacts, 3, 3)``.
+
+    Returns:
+        Block-diagonal tensor with shape
+        ``(..., 3 * num_contacts, 3 * num_contacts)``.
+    """
     batch_shape = rotations.shape[:-3]
     num_contacts = rotations.shape[-3]
     output = torch.zeros(

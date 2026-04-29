@@ -22,7 +22,24 @@ def run_contact_viewer(
     load_meshes: bool = True,
     max_frames: int | None = None,
 ) -> None:
-    """Run a Viser URDF viewer with Adam FK contact points overlaid."""
+    """Run a Viser URDF viewer with Adam FK contact frames overlaid.
+
+    Args:
+        asset_name: Asset alias or URDF path passed to
+            :class:`HumanoidDynamics`.
+        contact_mode: Contact extraction mode passed to
+            :class:`HumanoidDynamics`, such as ``"feet_corners"`` or
+            ``"feet_centers"``.
+        fps: Playback frequency for the synthetic walking sequence.
+        port: TCP port used by the local Viser server.
+        load_meshes: Whether to load visual meshes from the URDF.
+        max_frames: Optional number of frames to render before exiting. This
+            is intended for smoke tests; ``None`` runs the viewer indefinitely.
+
+    Returns:
+        None. The function starts a local Viser server and updates scene nodes
+        until interrupted or until ``max_frames`` is reached.
+    """
     try:
         import viser
         from viser.extras import ViserUrdf
@@ -117,6 +134,14 @@ def run_contact_viewer(
 
 
 def main() -> None:
+    """Parse CLI arguments and launch the contact viewer.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     parser = argparse.ArgumentParser(description="Visualize Unitree G1 contact-point FK.")
     parser.add_argument("--asset", default="unitree_g1")
     parser.add_argument("--contact-mode", default="feet_corners", choices=("feet_corners", "feet_centers"))

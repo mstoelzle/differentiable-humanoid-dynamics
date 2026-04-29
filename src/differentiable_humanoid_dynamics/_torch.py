@@ -4,12 +4,30 @@ import torch
 
 
 def normalize_quaternion_wxyz(q: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
-    """Normalize a quaternion stored as ``(w, x, y, z)``."""
+    """Normalize scalar-first quaternions.
+
+    Args:
+        q: Quaternion tensor with shape ``(..., 4)`` in ``(w, x, y, z)``
+            order.
+        eps: Minimum norm used to avoid division by zero.
+
+    Returns:
+        Tensor with shape ``(..., 4)`` containing unit quaternions in
+        ``(w, x, y, z)`` order.
+    """
     return q / torch.clamp(torch.linalg.norm(q, dim=-1, keepdim=True), min=eps)
 
 
 def quaternion_wxyz_to_matrix(q: torch.Tensor) -> torch.Tensor:
-    """Convert ``(w, x, y, z)`` quaternions to rotation matrices."""
+    """Convert scalar-first quaternions to rotation matrices.
+
+    Args:
+        q: Quaternion tensor with shape ``(..., 4)`` in ``(w, x, y, z)``
+            order. Inputs are normalized internally.
+
+    Returns:
+        Rotation matrix tensor with shape ``(..., 3, 3)``.
+    """
     q = normalize_quaternion_wxyz(q)
     w, x, y, z = torch.unbind(q, dim=-1)
 
@@ -37,7 +55,14 @@ def quaternion_wxyz_to_matrix(q: torch.Tensor) -> torch.Tensor:
 
 
 def matrix_to_quaternion_wxyz(matrix: torch.Tensor) -> torch.Tensor:
-    """Convert rotation matrices to quaternions in ``(w, x, y, z)`` order."""
+    """Convert rotation matrices to scalar-first quaternions.
+
+    Args:
+        matrix: Rotation matrix tensor with shape ``(..., 3, 3)``.
+
+    Returns:
+        Quaternion tensor with shape ``(..., 4)`` in ``(w, x, y, z)`` order.
+    """
     m00 = matrix[..., 0, 0]
     m01 = matrix[..., 0, 1]
     m02 = matrix[..., 0, 2]
@@ -59,7 +84,15 @@ def matrix_to_quaternion_wxyz(matrix: torch.Tensor) -> torch.Tensor:
 
 
 def rpy_to_matrix(rpy: torch.Tensor) -> torch.Tensor:
-    """Convert fixed-axis URDF roll-pitch-yaw angles to rotation matrices."""
+    """Convert fixed-axis URDF roll-pitch-yaw angles to matrices.
+
+    Args:
+        rpy: Roll-pitch-yaw angle tensor with shape ``(..., 3)`` and radians
+            stored as ``(roll, pitch, yaw)``.
+
+    Returns:
+        Rotation matrix tensor with shape ``(..., 3, 3)``.
+    """
     roll, pitch, yaw = torch.unbind(rpy, dim=-1)
     cr = torch.cos(roll)
     sr = torch.sin(roll)
@@ -89,7 +122,17 @@ def rpy_to_matrix(rpy: torch.Tensor) -> torch.Tensor:
 
 
 def make_transform(position: torch.Tensor, quaternion_wxyz: torch.Tensor) -> torch.Tensor:
-    """Build ``w_H_b`` from base position and base-to-world orientation."""
+    """Build homogeneous transforms from positions and quaternions.
+
+    Args:
+        position: Translation tensor with shape ``(..., 3)``.
+        quaternion_wxyz: Orientation tensor with shape ``(..., 4)`` in
+            ``(w, x, y, z)`` order. The orientation maps local-frame vectors to
+            the parent/world frame.
+
+    Returns:
+        Homogeneous transform tensor with shape ``(..., 4, 4)``.
+    """
     rotation = quaternion_wxyz_to_matrix(quaternion_wxyz)
     batch_shape = position.shape[:-1]
     transform = torch.zeros(*batch_shape, 4, 4, dtype=position.dtype, device=position.device)
@@ -102,10 +145,20 @@ def make_transform(position: torch.Tensor, quaternion_wxyz: torch.Tensor) -> tor
 def quaternion_derivative_from_world_angular_velocity(
     quaternion_wxyz: torch.Tensor, angular_velocity_world: torch.Tensor
 ) -> torch.Tensor:
-    """Return ``q_dot`` for ``q`` mapping base coordinates to world coordinates.
+    """Compute quaternion derivatives from world-frame angular velocity.
 
     The angular velocity is expressed in the world frame. For this convention,
     ``q_dot = 0.5 * [0, omega_W] * q``.
+
+    Args:
+        quaternion_wxyz: Quaternion tensor with shape ``(..., 4)`` in
+            ``(w, x, y, z)`` order. The quaternion maps base-frame coordinates
+            to world-frame coordinates.
+        angular_velocity_world: Angular velocity tensor with shape
+            ``(..., 3)`` expressed in the world frame.
+
+    Returns:
+        Quaternion derivative tensor with shape ``(..., 4)``.
     """
     q = normalize_quaternion_wxyz(quaternion_wxyz)
     w, x, y, z = torch.unbind(q, dim=-1)
@@ -123,7 +176,15 @@ def quaternion_derivative_from_world_angular_velocity(
 
 
 def skew(vector: torch.Tensor) -> torch.Tensor:
-    """Return the skew matrix ``[vector]x`` for the last dimension."""
+    """Return skew-symmetric cross-product matrices.
+
+    Args:
+        vector: Vector tensor with shape ``(..., 3)``.
+
+    Returns:
+        Tensor with shape ``(..., 3, 3)`` containing matrices ``[vector]x`` such
+        that ``[vector]x @ y == vector x y``.
+    """
     x, y, z = torch.unbind(vector, dim=-1)
     zero = torch.zeros_like(x)
     return torch.stack(
@@ -137,7 +198,18 @@ def skew(vector: torch.Tensor) -> torch.Tensor:
 
 
 def ensure_batch(tensor: torch.Tensor) -> tuple[torch.Tensor, bool]:
-    """Ensure a tensor has a leading batch dimension."""
+    """Ensure a tensor has a leading batch dimension.
+
+    Args:
+        tensor: Tensor with either unbatched shape ``(D,)`` or batched shape
+            ``(B, D)``. Higher-rank tensors are treated as already batched.
+
+    Returns:
+        Tuple ``(batched_tensor, was_single)``. ``batched_tensor`` has shape
+        ``(1, D)`` when the input was unbatched, otherwise it is returned
+        unchanged. ``was_single`` indicates whether a singleton batch dimension
+        was added.
+    """
     if tensor.ndim == 1:
         return tensor.unsqueeze(0), True
     return tensor, False

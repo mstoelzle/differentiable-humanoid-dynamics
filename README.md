@@ -33,6 +33,12 @@ Run the Adam/G1 smoke check:
 uv run dhd-check-adam-g1
 ```
 
+Run the root-level dynamics inspection example:
+
+```bash
+uv run python examples/inspect_g1_dynamics.py
+```
+
 Run the test suite:
 
 ```bash
@@ -116,6 +122,12 @@ Start the Viser viewer with:
 uv run --extra viz dhd-visualize-g1
 ```
 
+Or run the root-level visualization example:
+
+```bash
+uv run --extra viz python examples/visualize_g1_contacts.py
+```
+
 The viewer loads the local G1 URDF, plays a simple kinematic walking-like
 sequence, and overlays the differentiable contact-point FK estimates. The
 sequence is intentionally a visualization fixture, not a dynamically feasible
@@ -131,7 +143,6 @@ reimplement CRBA, RNEA, ABA, frame Jacobians, or forward kinematics.
 Robot assets under
 `src/differentiable_humanoid_dynamics/assets/robots/unitree_g1` come from
 [unitreerobotics/unitree_ros](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/g1_description).
-The deprecated G1 model files identified in Unitree's README were not vendored.
 The upstream BSD 3-Clause license is included at
 `src/differentiable_humanoid_dynamics/assets/robots/unitree_g1/LICENSE.unitree_ros`.
 

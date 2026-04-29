@@ -6,6 +6,14 @@ from differentiable_humanoid_dynamics import HumanoidDynamics
 
 
 def main() -> None:
+    """Run a G1 Adam dynamics smoke check and print tensor shapes.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     model = HumanoidDynamics(
         "unitree_g1",
         include_contact_forces=True,
