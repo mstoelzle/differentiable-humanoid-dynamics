@@ -97,8 +97,17 @@ class HumanoidContactModel(torch.nn.Module):
         self.contact_specs = tuple(specs)
         self.contact_names = tuple(spec.name for spec in specs)
         self.contact_link_names = tuple(spec.link_name for spec in specs)
+        unique_link_names: list[str] = []
+        contact_link_indices: list[int] = []
+        for spec in specs:
+            if spec.link_name not in unique_link_names:
+                unique_link_names.append(spec.link_name)
+            contact_link_indices.append(unique_link_names.index(spec.link_name))
+        self.unique_contact_link_names = tuple(unique_link_names)
         offsets = torch.as_tensor([spec.offset for spec in specs], dtype=dtype, device=self.device)
         local_rpy = torch.as_tensor([spec.rpy for spec in specs], dtype=dtype, device=self.device)
+        link_indices = torch.as_tensor(contact_link_indices, dtype=torch.long, device=self.device)
+        self.register_buffer("contact_link_indices", link_indices, persistent=False)
         self.register_buffer("local_offsets", offsets, persistent=False)
         self.register_buffer("local_rotations", rpy_to_matrix(local_rpy), persistent=False)
 
@@ -221,24 +230,30 @@ class HumanoidContactModel(torch.nn.Module):
             a single state or ``(batch, num_contacts, 4, 4)`` for batched
             inputs.
         """
-        transforms = []
-        for link_name, offset, local_rotation in zip(
-            self.contact_link_names, self.local_offsets, self.local_rotations
-        ):
-            transform = self._fk(link_name, base_transform, joint_positions)
-            rotation = transform[..., :3, :3]
-            translation = transform[..., :3, 3]
-            contact_rotation = torch.matmul(rotation, local_rotation.to(rotation))
-            contact_translation = translation + torch.matmul(
-                rotation, offset.to(rotation).unsqueeze(-1)
-            ).squeeze(-1)
+        link_transforms = self._contact_link_tensors(
+            self._stack_link_transforms(base_transform, joint_positions)
+        )
+        rotation = link_transforms[..., :3, :3]
+        translation = link_transforms[..., :3, 3]
+        offsets = self.local_offsets.to(dtype=rotation.dtype, device=rotation.device)
+        local_rotations = self.local_rotations.to(dtype=rotation.dtype, device=rotation.device)
 
-            contact_transform = torch.zeros_like(transform)
-            contact_transform[..., :3, :3] = contact_rotation
-            contact_transform[..., :3, 3] = contact_translation
-            contact_transform[..., 3, 3] = 1.0
-            transforms.append(contact_transform)
-        return torch.stack(transforms, dim=-3)
+        contact_rotation = torch.matmul(rotation, local_rotations)
+        contact_translation = translation + torch.matmul(
+            rotation, offsets.unsqueeze(-1)
+        ).squeeze(-1)
+
+        contact_transform = torch.zeros(
+            *contact_rotation.shape[:-2],
+            4,
+            4,
+            dtype=rotation.dtype,
+            device=rotation.device,
+        )
+        contact_transform[..., :3, :3] = contact_rotation
+        contact_transform[..., :3, 3] = contact_translation
+        contact_transform[..., 3, 3] = 1.0
+        return contact_transform
 
     def contact_jacobian(
         self, base_transform: torch.Tensor, joint_positions: torch.Tensor
@@ -259,17 +274,23 @@ class HumanoidContactModel(torch.nn.Module):
             ``(3 * num_contacts, 6 + n_joints)`` or batched shape
             ``(batch, 3 * num_contacts, 6 + n_joints)``.
         """
-        jacobians = []
-        for link_name, offset in zip(self.contact_link_names, self.local_offsets):
-            transform = self._fk(link_name, base_transform, joint_positions)
-            link_jacobian = self._jacobian(link_name, base_transform, joint_positions)
-            rotation = transform[..., :3, :3]
-            r_world = torch.matmul(rotation, offset.to(rotation).unsqueeze(-1)).squeeze(-1)
-            linear = link_jacobian[..., :3, :]
-            angular = link_jacobian[..., 3:6, :]
-            point_jacobian = linear - torch.matmul(skew(r_world), angular)
-            jacobians.append(point_jacobian)
-        return torch.cat(jacobians, dim=-2)
+        link_transforms = self._contact_link_tensors(
+            self._stack_link_transforms(base_transform, joint_positions)
+        )
+        link_jacobians = self._contact_link_tensors(
+            self._stack_link_jacobians(base_transform, joint_positions)
+        )
+        rotation = link_transforms[..., :3, :3]
+        offsets = self.local_offsets.to(dtype=rotation.dtype, device=rotation.device)
+        r_world = torch.matmul(rotation, offsets.unsqueeze(-1)).squeeze(-1)
+        linear = link_jacobians[..., :3, :]
+        angular = link_jacobians[..., 3:6, :]
+        point_jacobian = linear - torch.matmul(skew(r_world), angular)
+        return point_jacobian.reshape(
+            *point_jacobian.shape[:-3],
+            3 * self.num_contacts,
+            point_jacobian.shape[-1],
+        )
 
     def contact_spatial_jacobian(
         self, base_transform: torch.Tensor, joint_positions: torch.Tensor
@@ -291,17 +312,24 @@ class HumanoidContactModel(torch.nn.Module):
             ``(6 * num_contacts, 6 + n_joints)`` or batched shape
             ``(batch, 6 * num_contacts, 6 + n_joints)``.
         """
-        spatial_blocks = []
-        for link_name, offset in zip(self.contact_link_names, self.local_offsets):
-            transform = self._fk(link_name, base_transform, joint_positions)
-            link_jacobian = self._jacobian(link_name, base_transform, joint_positions)
-            rotation = transform[..., :3, :3]
-            r_world = torch.matmul(rotation, offset.to(rotation).unsqueeze(-1)).squeeze(-1)
-            linear = link_jacobian[..., :3, :] - torch.matmul(
-                skew(r_world), link_jacobian[..., 3:6, :]
-            )
-            spatial_blocks.append(torch.cat((linear, link_jacobian[..., 3:6, :]), dim=-2))
-        return torch.cat(spatial_blocks, dim=-2)
+        link_transforms = self._contact_link_tensors(
+            self._stack_link_transforms(base_transform, joint_positions)
+        )
+        link_jacobians = self._contact_link_tensors(
+            self._stack_link_jacobians(base_transform, joint_positions)
+        )
+        rotation = link_transforms[..., :3, :3]
+        offsets = self.local_offsets.to(dtype=rotation.dtype, device=rotation.device)
+        r_world = torch.matmul(rotation, offsets.unsqueeze(-1)).squeeze(-1)
+        linear = link_jacobians[..., :3, :] - torch.matmul(
+            skew(r_world), link_jacobians[..., 3:6, :]
+        )
+        spatial_blocks = torch.cat((linear, link_jacobians[..., 3:6, :]), dim=-2)
+        return spatial_blocks.reshape(
+            *spatial_blocks.shape[:-3],
+            6 * self.num_contacts,
+            spatial_blocks.shape[-1],
+        )
 
     def contact_force_transform(
         self,
@@ -363,6 +391,28 @@ class HumanoidContactModel(torch.nn.Module):
             raise RuntimeError("HumanoidContactModel requires an Adam KinDynComputations instance.")
         return self.kindyn.forward_kinematics(link_name, base_transform, joint_positions)
 
+    def _stack_link_transforms(
+        self, base_transform: torch.Tensor, joint_positions: torch.Tensor
+    ) -> torch.Tensor:
+        """Evaluate FK once per unique contact link and stack the results.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Link-to-world transforms with shape
+            ``(num_unique_contact_links, 4, 4)`` or batched shape
+            ``(batch, num_unique_contact_links, 4, 4)``.
+        """
+        transforms = [
+            self._fk(link_name, base_transform, joint_positions)
+            for link_name in self.unique_contact_link_names
+        ]
+        return torch.stack(transforms, dim=-3)
+
     def _jacobian(
         self, link_name: str, base_transform: torch.Tensor, joint_positions: torch.Tensor
     ) -> torch.Tensor:
@@ -386,6 +436,47 @@ class HumanoidContactModel(torch.nn.Module):
         if self.kindyn is None:
             raise RuntimeError("HumanoidContactModel requires an Adam KinDynComputations instance.")
         return self.kindyn.jacobian(link_name, base_transform, joint_positions)
+
+    def _stack_link_jacobians(
+        self, base_transform: torch.Tensor, joint_positions: torch.Tensor
+    ) -> torch.Tensor:
+        """Evaluate Jacobians once per unique contact link and stack them.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(4, 4)`` or ``(batch, 4, 4)``.
+            joint_positions: Joint position tensor with shape ``(n_joints,)``
+                or ``(batch, n_joints)``.
+
+        Returns:
+            Adam-order spatial Jacobians with shape
+            ``(num_unique_contact_links, 6, 6 + n_joints)`` or batched shape
+            ``(batch, num_unique_contact_links, 6, 6 + n_joints)``.
+        """
+        jacobians = [
+            self._jacobian(link_name, base_transform, joint_positions)
+            for link_name in self.unique_contact_link_names
+        ]
+        return torch.stack(jacobians, dim=-3)
+
+    def _contact_link_tensors(self, unique_link_tensors: torch.Tensor) -> torch.Tensor:
+        """Gather unique-link tensors into per-contact tensors.
+
+        Args:
+            unique_link_tensors: Tensor whose third-from-last dimension indexes
+                ``num_unique_contact_links``. Supported shapes include
+                ``(num_unique_contact_links, 4, 4)``,
+                ``(batch, num_unique_contact_links, 4, 4)``,
+                ``(num_unique_contact_links, 6, nv)``, and
+                ``(batch, num_unique_contact_links, 6, nv)``.
+
+        Returns:
+            Tensor with the same shape as ``unique_link_tensors`` except the
+            third-from-last dimension is expanded to ``num_contacts`` according
+            to ``self.contact_link_indices``.
+        """
+        indices = self.contact_link_indices.to(device=unique_link_tensors.device)
+        return torch.index_select(unique_link_tensors, dim=-3, index=indices)
 
 
 def _contact_specs_from_asset(asset: HumanoidAsset, mode: str) -> list[ContactPointSpec]:
@@ -478,16 +569,11 @@ def _block_diag_rotations(rotations: torch.Tensor) -> torch.Tensor:
         Block-diagonal tensor with shape
         ``(..., 3 * num_contacts, 3 * num_contacts)``.
     """
-    batch_shape = rotations.shape[:-3]
     num_contacts = rotations.shape[-3]
-    output = torch.zeros(
-        *batch_shape,
+    eye = torch.eye(num_contacts, dtype=rotations.dtype, device=rotations.device)
+    blocks = torch.einsum("...cij,cd->...cidj", rotations, eye)
+    return blocks.reshape(
+        *rotations.shape[:-3],
         3 * num_contacts,
         3 * num_contacts,
-        dtype=rotations.dtype,
-        device=rotations.device,
     )
-    for index in range(num_contacts):
-        start = 3 * index
-        output[..., start : start + 3, start : start + 3] = rotations[..., index, :, :]
-    return output

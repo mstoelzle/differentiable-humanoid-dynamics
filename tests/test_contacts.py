@@ -40,22 +40,83 @@ def test_contact_fk_and_jacobian_shapes(model: HumanoidDynamics) -> None:
     assert torch.allclose(torch.linalg.norm(normals, dim=-1), unit)
 
 
-def test_contact_jacobian_joint_directional_derivative(model: HumanoidDynamics) -> None:
+def test_batched_contact_fk_and_jacobian_shapes(model: HumanoidDynamics) -> None:
+    assert model.contact_model is not None
+    x0 = model.neutral_state()
+    x1 = x0.clone()
+    x1[0] = 0.1
+    x1[7:] = 0.02
+    x = torch.stack((x0, x1))
+    split = model.split_state(x)
+    base_transform = model.base_transform(x)
+    poses = model.contact_model.contact_poses(base_transform, split.joint_positions)
+    normals = model.contact_model.contact_normals(base_transform, split.joint_positions)
+    jacobian = model.contact_model.contact_jacobian(base_transform, split.joint_positions)
+    spatial_jacobian = model.contact_model.contact_spatial_jacobian(
+        base_transform, split.joint_positions
+    )
+    assert poses.positions.shape == (2, 8, 3)
+    assert poses.quaternions_wxyz.shape == (2, 8, 4)
+    assert poses.transforms.shape == (2, 8, 4, 4)
+    assert normals.shape == (2, 8, 3)
+    assert jacobian.shape == (2, 24, model.nv)
+    assert spatial_jacobian.shape == (2, 48, model.nv)
+    assert torch.isfinite(poses.positions).all()
+    assert torch.isfinite(poses.quaternions_wxyz).all()
+    assert torch.isfinite(normals).all()
+    assert torch.isfinite(jacobian).all()
+    assert torch.isfinite(spatial_jacobian).all()
+
+
+def test_contact_jacobian_calls_adam_once_per_unique_link(
+    model: HumanoidDynamics, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert model.contact_model is not None
     x = model.neutral_state()
     split = model.split_state(x)
+    base_transform = model.base_transform(x)
     q = split.joint_positions.squeeze(0)
-    direction = torch.linspace(-1.0, 1.0, model.n_joints, dtype=model.dtype)
-    direction = direction / torch.linalg.norm(direction)
-    eps = torch.as_tensor(1e-6, dtype=model.dtype)
+    fk_calls: list[str] = []
+    jacobian_calls: list[str] = []
+    original_fk = model.contact_model._fk
+    original_jacobian = model.contact_model._jacobian
+
+    def counting_fk(
+        link_name: str, base_transform: torch.Tensor, joint_positions: torch.Tensor
+    ) -> torch.Tensor:
+        fk_calls.append(link_name)
+        return original_fk(link_name, base_transform, joint_positions)
+
+    def counting_jacobian(
+        link_name: str, base_transform: torch.Tensor, joint_positions: torch.Tensor
+    ) -> torch.Tensor:
+        jacobian_calls.append(link_name)
+        return original_jacobian(link_name, base_transform, joint_positions)
+
+    monkeypatch.setattr(model.contact_model, "_fk", counting_fk)
+    monkeypatch.setattr(model.contact_model, "_jacobian", counting_jacobian)
+    model.contact_model.contact_jacobian(base_transform, q)
+
+    unique_links = list(model.contact_model.unique_contact_link_names)
+    assert fk_calls == unique_links
+    assert jacobian_calls == unique_links
+
+
+def test_contact_jacobian_matches_autograd_contact_fk(model: HumanoidDynamics) -> None:
+    assert model.contact_model is not None
+    x = model.neutral_state()
+    split = model.split_state(x)
+    q = split.joint_positions.squeeze(0).detach()
+    q = q + 0.03 * torch.sin(torch.arange(model.n_joints, dtype=model.dtype))
+    q = q.requires_grad_(True)
     base_transform = model.base_transform(x)
 
-    p_plus = model.contact_model.contact_positions(base_transform, q + eps * direction).reshape(-1)
-    p_minus = model.contact_model.contact_positions(base_transform, q - eps * direction).reshape(-1)
-    finite_difference = (p_plus - p_minus) / (2.0 * eps)
-    jacobian = model.contact_model.contact_jacobian(base_transform, q)
-    predicted = jacobian[:, 6:].matmul(direction)
-    assert torch.allclose(predicted, finite_difference, atol=2e-4, rtol=2e-4)
+    def contact_positions_from_joints(joint_positions: torch.Tensor) -> torch.Tensor:
+        return model.contact_model.contact_positions(base_transform, joint_positions).reshape(-1)
+
+    autodiff_jacobian = torch.autograd.functional.jacobian(contact_positions_from_joints, q)
+    analytical_jacobian = model.contact_model.contact_jacobian(base_transform, q.detach())[:, 6:]
+    assert torch.allclose(analytical_jacobian, autodiff_jacobian, atol=1e-8, rtol=1e-7)
 
 
 def test_contact_frame_force_mapping_is_supported() -> None:

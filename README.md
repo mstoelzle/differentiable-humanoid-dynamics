@@ -13,7 +13,8 @@ small humanoid-facing layer around those quantities:
 - vendored Unitree G1 URDF/MJCF assets,
 - a shared `torch.nn.Module` exposing control-affine `f(x)` and `g(x)`,
 - differentiable foot contact-point forward kinematics and Jacobians, and
-- a Viser-based viewer that overlays contact points on a walking-like sequence.
+- a Viser-based viewer that overlays contact points on a retargeted G1 motion
+  reference.
 
 ## Install
 
@@ -61,6 +62,7 @@ model = HumanoidDynamics(
 x = model.neutral_state()
 xdot_drift = model.f(x)
 control_map = model.g(x)
+xdot_drift, control_map = model.f_and_g(x)  # shared mass matrix + solve
 ```
 
 The dynamics are represented as:
@@ -128,10 +130,11 @@ Or run the root-level visualization example:
 uv run --extra viz python examples/visualize_g1_contacts.py
 ```
 
-The viewer loads the local G1 URDF, plays a simple kinematic walking-like
-sequence, and overlays the differentiable contact-point FK estimates. The
-sequence is intentionally a visualization fixture, not a dynamically feasible
-walking trajectory.
+The viewer loads the local G1 URDF, plays the bundled retargeted AMASS/G1
+kinematic reference, and overlays the differentiable contact-frame FK estimates.
+Pass `--synthetic-motion` to recover the older deterministic fallback sequence,
+or `--motion-reference /path/to/file.npz` / `--motion-reference /path/to/file.npy`
+to visualize another supported retargeted G1 motion.
 
 ## Sources And Attribution
 
@@ -145,6 +148,23 @@ Robot assets under
 [unitreerobotics/unitree_ros](https://github.com/unitreerobotics/unitree_ros/tree/master/robots/g1_description).
 The upstream BSD 3-Clause license is included at
 `src/differentiable_humanoid_dynamics/assets/robots/unitree_g1/LICENSE.unitree_ros`.
+
+The default bundled sample kinematic motion under
+`src/differentiable_humanoid_dynamics/assets/motions/g1_fleaven_retargeted` is
+`g1/Transitions_mocap/mazen_c3d/JOOF_walk_poses_120_jpos.npy` from
+[fleaven/Retargeted_AMASS_for_robotics](https://huggingface.co/datasets/fleaven/Retargeted_AMASS_for_robotics).
+That dataset is distributed under CC-BY-4.0 and contains AMASS motions
+retargeted to Unitree G1. The raw root quaternion is documented by the source
+dataset in `(x, y, z, w)` order; this package converts it to the `(w, x, y, z)`
+convention used by Adam-facing APIs.
+
+An additional bundled reference under
+`src/differentiable_humanoid_dynamics/assets/motions/g1_amass_retargeted` is
+`g1/CMU/06/06_01_poses_120_jpos.npz` from
+[ember-lab-berkeley/AMASS_Retargeted_for_G1](https://huggingface.co/datasets/ember-lab-berkeley/AMASS_Retargeted_for_G1).
+That dataset is distributed under CC-BY-4.0 and contains AMASS motions
+retargeted to Unitree G1. The original CMU source motion is from the
+[CMU Graphics Lab Motion Capture Database](https://mocap.cs.cmu.edu/).
 
 Files ending in `.adam.urdf` are generated compatibility copies of the upstream
 URDFs. They add identity joint origins where the upstream URDF omits them and

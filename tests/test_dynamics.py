@@ -24,18 +24,37 @@ def test_adam_computes_g1_dynamics_terms(model: HumanoidDynamics) -> None:
     assert torch.isfinite(terms.coriolis).all()
     assert torch.isfinite(terms.gravity).all()
     assert torch.allclose(terms.mass_matrix, terms.mass_matrix.T, atol=1e-7, rtol=1e-7)
+    assert torch.allclose(terms.bias, terms.coriolis + terms.gravity, atol=1e-10, rtol=1e-10)
 
 
 def test_f_and_g_shapes(model: HumanoidDynamics) -> None:
     x = model.neutral_state()
     drift = model.f(x)
     control = model.g(x)
+    fused_drift, fused_control = model.f_and_g(x)
     assert drift.shape == (model.state_dim,)
     assert control.shape == (model.state_dim, model.input_dim)
+    assert fused_drift.shape == (model.state_dim,)
+    assert fused_control.shape == (model.state_dim, model.input_dim)
     assert torch.isfinite(drift).all()
     assert torch.isfinite(control).all()
+    assert torch.allclose(fused_drift, drift)
+    assert torch.allclose(fused_control, control)
     assert torch.count_nonzero(control[: model.nq]) == 0
     assert model.input_dim == model.n_joints + 24
+
+
+def test_f_and_g_batched_shapes(model: HumanoidDynamics) -> None:
+    x0 = model.neutral_state()
+    x1 = x0.clone()
+    x1[0] = 0.1
+    x1[model.nq :] = 0.02
+    x = torch.stack((x0, x1))
+    drift, control = model.f_and_g(x)
+    assert drift.shape == (2, model.state_dim)
+    assert control.shape == (2, model.state_dim, model.input_dim)
+    assert torch.isfinite(drift).all()
+    assert torch.isfinite(control).all()
 
 
 def test_forward_matches_control_affine_formula(model: HumanoidDynamics) -> None:
@@ -43,6 +62,24 @@ def test_forward_matches_control_affine_formula(model: HumanoidDynamics) -> None
     u = torch.linspace(-0.05, 0.05, model.input_dim, dtype=model.dtype)
     expected = model.f(x) + model.g(x).matmul(u)
     assert torch.allclose(model(x, u), expected)
+
+
+def test_forward_with_control_uses_fused_mass_matrix(
+    model: HumanoidDynamics, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    x = model.neutral_state()
+    u = torch.linspace(-0.05, 0.05, model.input_dim, dtype=model.dtype)
+    calls = 0
+    original_mass_matrix = model.kindyn.mass_matrix
+
+    def counting_mass_matrix(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_mass_matrix(*args, **kwargs)
+
+    monkeypatch.setattr(model.kindyn, "mass_matrix", counting_mass_matrix)
+    model(x, u)
+    assert calls == 1
 
 
 def test_drift_is_differentiable(model: HumanoidDynamics) -> None:

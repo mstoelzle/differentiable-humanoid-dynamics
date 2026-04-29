@@ -50,9 +50,8 @@ class DynamicsTerms:
         coriolis: Coriolis/centrifugal generalized force vector with shape
             ``(..., nv)``.
         gravity: Gravity generalized force vector with shape ``(..., nv)``.
-        bias: Full bias force vector with shape ``(..., nv)``. When Adam
-            exposes ``bias_force`` this is used directly; otherwise it is
-            ``coriolis + gravity``.
+        bias: Full bias force vector ``coriolis + gravity`` with shape
+            ``(..., nv)``.
     """
 
     mass_matrix: torch.Tensor
@@ -247,15 +246,7 @@ class HumanoidDynamics(torch.nn.Module):
             split.joint_velocities,
         )
         gravity = self.kindyn.gravity_term(base_transform, split.joint_positions)
-        if hasattr(self.kindyn, "bias_force"):
-            bias = self.kindyn.bias_force(
-                base_transform,
-                split.joint_positions,
-                split.base_velocity,
-                split.joint_velocities,
-            )
-        else:
-            bias = coriolis + gravity
+        bias = coriolis + gravity
         if split.was_single:
             return DynamicsTerms(
                 mass_matrix=mass.squeeze(0),
@@ -283,20 +274,7 @@ class HumanoidDynamics(torch.nn.Module):
         split = self.split_state(x)
         base_transform = make_transform(split.base_position, split.base_quaternion_wxyz)
         mass = self.kindyn.mass_matrix(base_transform, split.joint_positions)
-        if hasattr(self.kindyn, "bias_force"):
-            bias = self.kindyn.bias_force(
-                base_transform,
-                split.joint_positions,
-                split.base_velocity,
-                split.joint_velocities,
-            )
-        else:
-            bias = self.kindyn.coriolis_term(
-                base_transform,
-                split.joint_positions,
-                split.base_velocity,
-                split.joint_velocities,
-            ) + self.kindyn.gravity_term(base_transform, split.joint_positions)
+        bias = self._bias_force(base_transform, split)
 
         acceleration = torch.linalg.solve(mass, -bias.unsqueeze(-1)).squeeze(-1)
         q_dot = self._configuration_derivative(split)
@@ -327,16 +305,52 @@ class HumanoidDynamics(torch.nn.Module):
         generalized_input = self._generalized_input_matrix(base_transform, split.joint_positions)
         acceleration_map = torch.linalg.solve(mass, generalized_input)
 
-        batch = split.base_position.shape[0]
-        control_matrix = torch.zeros(
-            batch,
-            self.state_dim,
-            self.input_dim,
-            dtype=self.dtype,
-            device=self.device,
+        control_matrix = self._control_matrix_from_acceleration_map(
+            acceleration_map,
+            batch_size=split.base_position.shape[0],
         )
-        control_matrix[..., self.nq :, :] = acceleration_map
         return control_matrix.squeeze(0) if split.was_single else control_matrix
+
+    def f_and_g(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return drift and control matrices with shared dynamics work.
+
+        This fused path is useful when both :meth:`f` and :meth:`g` are needed
+        for the same state, for example during CBF/CLF construction. It
+        evaluates the mass matrix once and solves one block linear system with
+        right-hand side ``[-h(q, nu), B(q)]``, where ``B(q)`` maps inputs to
+        generalized forces.
+
+        Args:
+            x: State tensor with shape ``(state_dim,)`` or
+                ``(batch, state_dim)``.
+
+        Returns:
+            Tuple ``(drift, control_matrix)``. For a single state, ``drift``
+            has shape ``(state_dim,)`` and ``control_matrix`` has shape
+            ``(state_dim, input_dim)``. For batched states, shapes are
+            ``(batch, state_dim)`` and ``(batch, state_dim, input_dim)``.
+        """
+        split = self.split_state(x)
+        base_transform = make_transform(split.base_position, split.base_quaternion_wxyz)
+        mass = self.kindyn.mass_matrix(base_transform, split.joint_positions)
+        bias = self._bias_force(base_transform, split)
+        if bias.ndim == 1:
+            bias = bias.unsqueeze(0)
+        generalized_input = self._generalized_input_matrix(base_transform, split.joint_positions)
+        rhs = torch.cat((-bias.unsqueeze(-1), generalized_input), dim=-1)
+        solution = torch.linalg.solve(mass, rhs)
+
+        acceleration = solution[..., 0]
+        acceleration_map = solution[..., 1:]
+        q_dot = self._configuration_derivative(split)
+        drift = torch.cat((q_dot, acceleration), dim=-1)
+        control_matrix = self._control_matrix_from_acceleration_map(
+            acceleration_map,
+            batch_size=split.base_position.shape[0],
+        )
+        if split.was_single:
+            return drift.squeeze(0), control_matrix.squeeze(0)
+        return drift, control_matrix
 
     def forward(self, x: torch.Tensor, u: torch.Tensor | None = None) -> torch.Tensor:
         """Evaluate the control-affine dynamics.
@@ -352,10 +366,9 @@ class HumanoidDynamics(torch.nn.Module):
             State derivative with shape ``(state_dim,)`` or
             ``(batch, state_dim)``.
         """
-        drift = self.f(x)
         if u is None:
-            return drift
-        control = self.g(x)
+            return self.f(x)
+        drift, control = self.f_and_g(x)
         return drift + torch.matmul(control, u.unsqueeze(-1)).squeeze(-1)
 
     def selection_matrix_transpose(self, *, batch_size: int | None = None) -> torch.Tensor:
@@ -394,6 +407,65 @@ class HumanoidDynamics(torch.nn.Module):
             split.base_quaternion_wxyz, omega_world
         )
         return torch.cat((p_dot, quat_dot, split.joint_velocities), dim=-1)
+
+    def _control_matrix_from_acceleration_map(
+        self,
+        acceleration_map: torch.Tensor,
+        *,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Embed a generalized-acceleration map in the full state derivative.
+
+        Args:
+            acceleration_map: Tensor with shape ``(batch, nv, input_dim)``
+                mapping inputs to generalized accelerations.
+            batch_size: Leading batch dimension used for the returned tensor.
+
+        Returns:
+            Control matrix with shape ``(batch, state_dim, input_dim)``. The
+            configuration-derivative rows are zero and the last ``nv`` rows
+            contain ``acceleration_map``.
+        """
+        control_matrix = torch.zeros(
+            batch_size,
+            self.state_dim,
+            self.input_dim,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        control_matrix[..., self.nq :, :] = acceleration_map
+        return control_matrix
+
+    def _bias_force(self, base_transform: torch.Tensor, split: SplitState) -> torch.Tensor:
+        """Return the combined Coriolis/centrifugal and gravity force.
+
+        Adam's ``bias_force`` is the reduced RNEA call with current generalized
+        velocity and the configured gravity vector, i.e. the same ``h(q, nu)``
+        as ``coriolis_term + gravity_term``. Use it when available because
+        drift dynamics only need the combined vector, not the separated terms.
+
+        Args:
+            base_transform: Base-to-world transform ``W_H_B`` with shape
+                ``(batch, 4, 4)``.
+            split: Split state with batched joint positions and velocities.
+
+        Returns:
+            Bias force tensor with shape ``(batch, nv)`` or ``(nv,)``,
+            matching Adam's batch squeezing behavior.
+        """
+        if hasattr(self.kindyn, "bias_force"):
+            return self.kindyn.bias_force(
+                base_transform,
+                split.joint_positions,
+                split.base_velocity,
+                split.joint_velocities,
+            )
+        return self.kindyn.coriolis_term(
+            base_transform,
+            split.joint_positions,
+            split.base_velocity,
+            split.joint_velocities,
+        ) + self.kindyn.gravity_term(base_transform, split.joint_positions)
 
     def _generalized_input_matrix(
         self, base_transform: torch.Tensor, joint_positions: torch.Tensor
