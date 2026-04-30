@@ -161,6 +161,17 @@ Pass `--synthetic-motion` to recover the older deterministic fallback sequence,
 or `--motion-reference /path/to/file.npz` / `--motion-reference /path/to/file.npy`
 to visualize another supported retargeted G1 motion.
 
+To export the standard kinematic visualization as an MP4, use the Viser render
+export path rather than a manual start/stop recording button:
+
+```bash
+uv run --extra viz focodyn-visualize-g1 \
+  --export-video outputs/videos/kinematic_trajectory.mp4 \
+  --export-width 1280 \
+  --export-height 720 \
+  --port 0
+```
+
 For inspecting the dynamics maps, use the specialized viewer:
 
 ```bash
@@ -176,6 +187,22 @@ joint torques, and contact force vectors. The dynamics viewer renders the robot
 semi-transparently by default and includes a `Joint torque viz` selector for
 showing torque arrows, text labels, or both. Override the transparency with
 `--robot-opacity 0.5` when needed.
+
+Export both dynamics verification videos with:
+
+```bash
+uv run --extra viz focodyn-visualize-dynamics \
+  --export-dynamics-videos outputs/videos \
+  --export-width 1280 \
+  --export-height 720 \
+  --port 0
+```
+
+Video export requires `ffmpeg` and a Chromium-compatible browser. The exporter
+launches a temporary headless browser client, captures each frame with Viser,
+and writes H.264 MP4 files. Pass `--export-frames N` for a shorter clip during
+tests, or `--export-browser /path/to/browser` if Chrome/Chromium is not on the
+standard path.
 
 ## Sources And Attribution
 
