@@ -154,7 +154,7 @@ uv run --extra viz focodyn-visualize-g1
 Or run the root-level visualization example:
 
 ```bash
-uv run --extra viz python examples/visualize_g1_contacts.py
+uv run --extra viz python examples/visualize_g1.py
 ```
 
 The viewer loads the local G1 URDF, plays the bundled retargeted AMASS/G1
