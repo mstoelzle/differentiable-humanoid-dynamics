@@ -141,7 +141,11 @@ uv run --extra viz focodyn-plot-motion-derivatives --lambdas 10 100 1000 10000 -
 
 ## Visualization
 
-Start the Viser viewer with:
+The `viz` extra provides two Viser-based viewers.
+
+### Kinematic Trajectory Viewer
+
+Start the standard kinematic trajectory viewer with:
 
 ```bash
 uv run --extra viz focodyn-visualize-g1
@@ -171,6 +175,8 @@ uv run --extra viz focodyn-visualize-g1 \
   --export-height 720 \
   --port 0
 ```
+
+### Dynamics Verification Viewer
 
 For inspecting the dynamics maps, use the specialized viewer:
 
